@@ -6,7 +6,7 @@ interface CardWrapperProps {
 
 export default function CardWrapper({ children }: CardWrapperProps) {
   return (
-    <div className="bg-white/20 dark:bg-gray-800/30 backdrop-blur-lg border border-white/30 dark:border-gray-500/30 rounded-xl shadow-xl p-6 hover:shadow-2xl hover:scale-105 transform transition duration-300 ease-in-out">
+    <div className="glass-panel glass-edge rounded-3xl p-6 transition-all duration-300 ease-out hover:shadow-2xl hover:-translate-y-1">
       {children}
     </div>
   );

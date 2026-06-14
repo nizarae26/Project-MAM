@@ -5,7 +5,7 @@ import LightCard from './components/LightCard';
 import AlarmPanel from './components/AlarmPanel';
 import DeviceStatusPanel from './components/DeviceStatusPanel';
 import { supabase } from './lib/supabase';
-import { fetchLatestSensorData, fetchDeviceStatuses } from './utils/supabaseQueries';
+import { fetchSensorHistory, fetchDeviceStatuses } from './utils/supabaseQueries';
 
 type Alarm = {
   icon: string;
@@ -19,21 +19,15 @@ export default function App() {
     percent: number;
     height: number;
     status: 'KRITIS' | 'PENGISIAN' | 'PENUH';
-  } | null>(null);
-  const [light, setLight] = useState<{ lux: number; weather: string } | null>(null);
+  }>({ percent: 0, height: 0, status: 'PENGISIAN' });
+  
+  const [light, setLight] = useState<{ lux: number; weather: string }>({ lux: 0, weather: 'TIDAK DIKETAHUI' });
   const [alarms, setAlarms] = useState<Alarm[]>([]);
-  const [devices, setDevices] = useState<Array<{ device_id: string; is_online: boolean }>>([]);
+  const [devices, setDevices] = useState<Array<{ device_id: string; is_online: boolean }>>([
+    { device_id: 'NODE_CAHAYA_01', is_online: false }
+  ]);
 
-  // Map a sensor row to UI state and generate alarms
-  const handleSensor = (data: any) => {
-    if (!data) return;
-    setWater({
-      percent: data.water_percent ?? 0,
-      height: data.water_cm ?? 0,
-      status: data.water_status ?? 'PENGISIAN',
-    });
-    setLight({ lux: data.light_lux ?? 0, weather: data.weather ?? '' });
-
+  const generateAlarms = (data: any): Alarm[] => {
     const newAlarms: Alarm[] = [];
     if (data.water_status === 'KRITIS') {
       newAlarms.push({
@@ -43,11 +37,11 @@ export default function App() {
         time: new Date(data.recorded_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
       });
     }
-    if (data.weather && data.weather.toLowerCase().includes('hujan')) {
+    if (data.weather && (data.weather.toLowerCase().includes('hujan') || data.weather.toLowerCase().includes('mendung'))) {
       newAlarms.push({
         icon: '🌧',
-        title: 'PERINGATAN HUJAN',
-        detail: `Lux: ${data.light_lux ?? '-'} `,
+        title: 'PERINGATAN CUACA BURUK',
+        detail: `Status: ${data.weather} (Lux: ${data.light_lux ?? '-'})`,
         time: new Date(data.recorded_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
       });
     }
@@ -59,18 +53,46 @@ export default function App() {
         time: new Date(data.recorded_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
       });
     }
-    setAlarms(prev => [...newAlarms, ...prev]);
+    return newAlarms;
   };
 
-  // Initial load
-  useEffect(() => {
-    fetchLatestSensorData().then(data => {
-      if (data) handleSensor(data);
+  const handleSensor = (data: any) => {
+    if (!data) return;
+    // Update live states
+    setWater({
+      percent: data.water_percent ?? water.percent,
+      height: data.water_cm ?? water.height,
+      status: (data.water_status as 'KRITIS' | 'PENGISIAN' | 'PENUH') ?? water.status,
     });
+    setLight({ 
+      lux: data.light_lux ?? light.lux, 
+      weather: data.weather ?? light.weather 
+    });
+
+    // Replace the alarms list with the CURRENT state's alarms (so it disappears if conditions are normal)
+    setAlarms(generateAlarms(data));
+  };
+
+  useEffect(() => {
+    // Initial fetch
+    fetchSensorHistory(1).then(history => {
+      if (history && history.length > 0) {
+        const latest = history[0];
+        setWater({
+          percent: latest.water_percent ?? 0,
+          height: latest.water_cm ?? 0,
+          status: (latest.water_status as 'KRITIS' | 'PENGISIAN' | 'PENUH') ?? 'PENGISIAN',
+        });
+        setLight({ lux: latest.light_lux ?? 0, weather: latest.weather ?? 'TIDAK DIKETAHUI' });
+
+        // Set alarms only for the current latest state
+        setAlarms(generateAlarms(latest));
+      }
+    });
+
     fetchDeviceStatuses().then(setDevices);
   }, []);
 
-  // Real‑time subscriptions
   useEffect(() => {
     const sensorChannel = supabase
       .channel('public:sensor_data')
@@ -92,15 +114,39 @@ export default function App() {
     };
   }, []);
 
+  const waterAlarms = alarms.filter(a => a.title.includes('AIR'));
+  const lightAlarms = alarms.filter(a => a.title.includes('HUJAN') || a.title.includes('CAHAYA') || a.title.includes('CUACA'));
+
   return (
-    <div className="min-h-screen bg-gray-100 dark:bg-gray-900 text-gray-900 dark:text-gray-100">
-      <Header />
-      <main className="p-4 grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-        {water && <WaterCard {...water} />}
-        {light && <LightCard {...light} />}
-        <AlarmPanel alarms={alarms} />
-        <DeviceStatusPanel devices={devices} />
-      </main>
+    <div className="min-h-screen relative overflow-hidden transition-colors duration-500">
+      {/* Background Animated Blobs for Glassmorphism */}
+      <div className="absolute top-0 -left-4 w-72 h-72 bg-blue-300 dark:bg-blue-900 rounded-full mix-blend-multiply dark:mix-blend-lighten filter blur-3xl opacity-70 animate-blob pointer-events-none"></div>
+      <div className="absolute top-0 -right-4 w-72 h-72 bg-cyan-300 dark:bg-teal-900 rounded-full mix-blend-multiply dark:mix-blend-lighten filter blur-3xl opacity-70 animate-blob animation-delay-2000 pointer-events-none"></div>
+      <div className="absolute -bottom-8 left-20 w-72 h-72 bg-indigo-300 dark:bg-indigo-900 rounded-full mix-blend-multiply dark:mix-blend-lighten filter blur-3xl opacity-70 animate-blob animation-delay-4000 pointer-events-none"></div>
+
+      <div className="relative z-10 min-h-screen pb-10">
+        <Header />
+        <main className="p-6 max-w-6xl mx-auto grid gap-6 md:grid-cols-2">
+          
+          {/* Kolom Kiri: Sensor Air */}
+          <div className="flex flex-col gap-6">
+            {water && <WaterCard {...water} />}
+            <AlarmPanel title="Peringatan Air" icon="🌊" alarms={waterAlarms} />
+          </div>
+
+          {/* Kolom Kanan: Sensor Cahaya */}
+          <div className="flex flex-col gap-6">
+            {light && <LightCard {...light} />}
+            <AlarmPanel title="Peringatan Cuaca" icon="🌦" alarms={lightAlarms} />
+          </div>
+
+          {/* Kolom Bawah: Hardware Status */}
+          <div className="md:col-span-2">
+            <DeviceStatusPanel devices={devices} />
+          </div>
+
+        </main>
+      </div>
     </div>
   );
 }
